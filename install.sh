@@ -16,6 +16,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# Default installation directory
+INSTALL_DIR="/usr/local/claude-code-local"
+
 # Helper functions
 log_step() {
     echo -e "\n${BLUE}▶${NC} ${BOLD}$1${NC}"
@@ -43,7 +46,31 @@ check_command() {
     fi
 }
 
-# Functions for installation
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --install-dir)
+                INSTALL_DIR="$2"
+                shift 2
+                ;;
+            --help|-h)
+                echo "Install Claude Code Local"
+                echo ""
+                echo "Usage: install.sh [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --install-dir DIR   Specify custom installation directory (default: /usr/local/claude-code-local)"
+                echo "  --help, -h          Show this help message"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Unknown option: $1${NC}"
+                exit 1
+                ;;
+        esac
+    done
+}
+
 install_ollama() {
     log_step "Installing Ollama runtime..."
     if check_command ollama; then
@@ -53,6 +80,14 @@ install_ollama() {
     # Install Ollama (Linux/Mac only)
     curl -fsSL https://ollama.ai/install.sh | bash
     log_success "Ollama installed successfully."
+}
+
+configure_ollama() {
+    log_step "Configuring Ollama to use custom directory..."
+    mkdir -p "$INSTALL_DIR/ollama"
+    ollama daemon --storage "$INSTALL_DIR/ollama" &
+    sleep 2
+    log_success "Ollama configured to use $INSTALL_DIR/ollama for model storage."
 }
 
 install_gpt_oss_model() {
@@ -72,13 +107,22 @@ install_claude_cli() {
         echo "Claude Code CLI is already installed."
         return
     fi
-    # Install Claude Code CLI (assumption: it's installed via pip)
+
+    log_step "Installing Claude Code CLI in $INSTALL_DIR/claude-cli..."
+    mkdir -p "$INSTALL_DIR/claude-cli"
+    python3 -m venv "$INSTALL_DIR/claude-cli/venv"
+    source "$INSTALL_DIR/claude-cli/venv/bin/activate"
     pip install claude-cli
-    log_success "Claude Code CLI installed successfully."
+    deactivate
+
+    log_success "Claude Code CLI installed successfully in $INSTALL_DIR/claude-cli."
 }
 
 # Main setup
+parse_arguments "$@"
+
 log_step "Starting installation for Claude Code Local."
+log_step "Using installation directory: $INSTALL_DIR"
 
 # Install prerequisites
 log_step "Ensuring required dependencies (Docker, Node.js, Python)..."
@@ -101,6 +145,7 @@ log_success "All dependencies are installed."
 
 # Install components
 install_ollama
+configure_ollama
 install_gpt_oss_model
 install_claude_cli
 
@@ -112,8 +157,10 @@ echo -e "  - ${CYAN}Ollama${NC}"
 echo -e "      ↳ Includes GPT-OSS model for Claude Code CLI."
 echo -e "  - ${CYAN}Claude Code CLI${NC}"
 
+echo -e "\n${BOLD}Custom installation directory:${NC} $INSTALL_DIR"
+
 echo -e "\n${BOLD}Next steps:${NC}"
 echo -e "  1. Test Ollama:         ${CYAN}ollama chat gpt-oss${NC}"
-echo -e "  2. Test Claude CLI:     ${CYAN}claude-cli --model=gpt-oss 'Write a Python loop that iterates over a list.'${NC}"
+echo -e "  2. Test Claude CLI:     ${CYAN}source $INSTALL_DIR/claude-cli/venv/bin/activate && claude-cli --model=gpt-oss 'Write a Python loop that iterates over a list.'${NC}"
 
 echo -e "\n${YELLOW}Happy coding! 🚀${NC}"
