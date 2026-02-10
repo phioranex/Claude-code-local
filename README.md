@@ -168,7 +168,7 @@ echo "$msg" > .git/COMMIT_EDITMSG
 
 ## Notes & Troubleshooting ⚠️
 
-- macOS: Homebrew is used when available; otherwise the script downloads the darwin bundle and places `ollama` in a standard location (may use `sudo` to move the binary).
+- macOS: Homebrew is used when available and writable; if Homebrew is not writable (common on macOS with `/opt/homebrew` permissions), the installer will automatically download the Ollama darwin bundle and install the `ollama` binary into `~/.local/bin` (no sudo required). This avoids manual permission fixes and makes the installer fire-and-forget for most users.
 - Linux: uses the official installer: `curl -fsSL https://ollama.com/install.sh | sh` (this is the safe, supported install path).
 - Windows: the script will generate `install-windows.ps1` (PowerShell helper) and instruct you to run it as Administrator: `Set-ExecutionPolicy Bypass -Scope Process -Force; .\install-windows.ps1`. Alternatively, install from https://ollama.com/download or run the installer from WSL.
 - If a model name fails to pull, check `ollama list` and `ollama library` or visit https://ollama.com/library for model names.

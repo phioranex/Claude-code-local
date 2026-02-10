@@ -8,7 +8,7 @@ set -euo pipefail
 # Non-interactive usage example:
 #   curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --yes --model claude --context 32768
 
-REPO_URL="https://github.com/YOUR_USER/YOUR_REPO"
+REPO_URL="https://github.com/phioranex/Claude-code-local"
 LOCAL_BIN="$HOME/.local/bin"
 ENV_FILE="$HOME/.claudecode_env"
 
@@ -72,16 +72,44 @@ detect_os() {
 }
 
 install_ollama_macos() {
+  # Try Homebrew first when available
   if command_exists brew; then
-    echo "Installing Ollama with Homebrew..."
-    brew install ollama || true
+    BREW_PREFIX=$(brew --prefix 2>/dev/null || true)
+    if [ -n "$BREW_PREFIX" ] && [ -w "$BREW_PREFIX" ]; then
+      echo "Attempting to install Ollama with Homebrew..."
+      if brew install ollama; then
+        echo "Homebrew install succeeded."
+        return 0
+      else
+        echo "Homebrew install failed; falling back to local user install in $LOCAL_BIN"
+      fi
+    else
+      echo "Homebrew detected at $BREW_PREFIX but it is not writable by this user; falling back to local user install in $LOCAL_BIN"
+    fi
   else
-    echo "Homebrew not found. Downloading Ollama release..."
-    TMPDIR=$(mktemp -d)
-    curl -L -o "$TMPDIR/ollama-darwin.tgz" "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.tgz"
+    echo "Homebrew not found. Falling back to direct download and local install in $LOCAL_BIN"
+  fi
+
+  # Ensure local bin exists
+  ensure_local_bin
+
+  TMPDIR=$(mktemp -d)
+  echo "Downloading Ollama release to $TMPDIR ..."
+  if curl -fsSL -o "$TMPDIR/ollama-darwin.tgz" "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.tgz"; then
     tar -xzf "$TMPDIR/ollama-darwin.tgz" -C "$TMPDIR"
-    sudo mv "$TMPDIR/ollama" /usr/local/bin/ollama || sudo mv "$TMPDIR/ollama" /opt/homebrew/bin/ollama || true
+    if [ -f "$TMPDIR/ollama" ]; then
+      mv "$TMPDIR/ollama" "$LOCAL_BIN/ollama" || cp "$TMPDIR/ollama" "$LOCAL_BIN/ollama"
+      chmod +x "$LOCAL_BIN/ollama"
+      echo "Installed Ollama to $LOCAL_BIN/ollama"
+    else
+      echo "Downloaded archive did not contain 'ollama' binary; aborting." >&2
+      rm -rf "$TMPDIR"; return 1
+    fi
     rm -rf "$TMPDIR"
+    return 0
+  else
+    echo "Failed to download Ollama release." >&2
+    rm -rf "$TMPDIR"; return 1
   fi
 }
 
@@ -178,6 +206,84 @@ pull_model() {
   local model="$1"
   echo "Pulling model: $model"
   ollama pull "$model" || true
+}
+
+verify_ollama_installed() {
+  if ! command_exists ollama; then
+    echo "Error: 'ollama' not found in PATH." >&2
+    return 1
+  fi
+  # Print version if available
+  echo "Ollama available: $(ollama --version 2>/dev/null || echo 'version unknown')"
+  return 0
+}
+
+# Import a local GGUF and create an Ollama model from it
+handle_gguf_import() {
+  local gguf="$1"
+  local name="$2"
+  if [ ! -f "$gguf" ]; then
+    echo "GGUF file not found: $gguf" >&2
+    return 1
+  fi
+  local base
+  base=$(basename "$gguf")
+  local target_dir="$PWD/claude-code-gguf"
+  mkdir -p "$target_dir"
+  cp -f "$gguf" "$target_dir/$base"
+  cat > "$target_dir/Modelfile" <<EOF
+FROM ./$base
+EOF
+  if [ -z "$name" ]; then
+    name="${base%.*}"
+  fi
+  echo "Creating Ollama model '$name' from $base..."
+  pushd "$target_dir" >/dev/null
+  ollama create "$name" -f ./Modelfile || true
+  popd >/dev/null
+  if ollama list | grep -E "\b${name}\b" >/dev/null 2>&1; then
+    echo "GGUF model '$name' created successfully."
+    echo "$name"
+    return 0
+  else
+    echo "Failed to create model from GGUF." >&2
+    return 1
+  fi
+}
+
+# Check if a model exists locally in Ollama
+verify_model_exists() {
+  local model="$1"
+  if ollama list | grep -E "\b${model}\b" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# Ensure Ollama server is running (start it in the background if needed)
+ensure_ollama_server_running() {
+  # Quick check: 'ollama list' should return exit 0 when server is reachable
+  if ollama list >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Ollama server not running; attempting to start 'ollama serve' in background..."
+  # Start in background; do not block the script. Use nohup to avoid SIGHUP termination.
+  nohup ollama serve >/dev/null 2>&1 &
+  local start_time
+  start_time=$(date +%s)
+  local timeout=30
+  while true; do
+    if ollama list >/dev/null 2>&1; then
+      echo "Ollama server started."
+      return 0
+    fi
+    if [ $(( $(date +%s) - start_time )) -gt $timeout ]; then
+      echo "Timed out waiting for Ollama server to start (waited ${timeout}s)." >&2
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 # Remove a specific line (pattern) from a file safely
@@ -299,7 +405,11 @@ main() {
     echo "Non-interactive: model=$MODEL context=$CTX"
     echo "Proceeding with recommended automated install..."
     if [ -z "$GGUF_PATH" ]; then
-      pull_model "$MODEL"
+      if ensure_ollama_server_running; then
+        pull_model "$MODEL"
+      else
+        echo "Warning: could not start Ollama server; skipping model pull. You can start it later with 'ollama serve' and run 'ollama pull $MODEL' manually." >&2
+      fi
     fi
     ensure_local_bin
     create_wrapper "$MODEL" "$CTX"
@@ -342,7 +452,11 @@ main() {
       read -rp "Pull the model now? [Y/n]: " pullnow
       pullnow=${pullnow:-Y}
       if [[ "$pullnow" =~ ^[Yy] ]]; then
-        pull_model "$MODEL"
+        if ensure_ollama_server_running; then
+          pull_model "$MODEL"
+        else
+          echo "Warning: could not start Ollama server; skipping model pull. You can start it later with 'ollama serve' and run 'ollama pull $MODEL' manually." >&2
+        fi
       fi
       ensure_local_bin
       create_wrapper "$MODEL" "$CTX"
