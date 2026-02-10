@@ -173,16 +173,33 @@ source ~/.claudecode_env
 exec $SHELL
 ```
 
-- If a model pull failed with "pull model manifest: file does not exist", start the Ollama server and try pulling manually:
+- If a model pull failed with "pull model manifest: file does not exist":
 
-```bash
-# start server in background
-nohup ollama serve >/dev/null 2>&1 &
-# pull the model
-ollama pull claude
-# check available models if pull fails
-ollama library
-```
+  1. Start the Ollama server in the background:
+
+  ```bash
+  nohup ollama serve >/dev/null 2>&1 &
+  ```
+
+  2. Check available models and pull a supported one:
+
+  ```bash
+  ollama library | sed -n '1,40p'
+  ollama pull <model-name>
+  ```
+
+  3. The installer now attempts to auto-select a fallback model from the library if your chosen model is not available. If you prefer a specific model, set `CLAUDE_MODEL` before running `claude-code`, e.g.:
+
+  ```bash
+  export CLAUDE_MODEL="gemma3"
+  claude-code "Summarize my project"
+  ```
+
+  You can also override per-invocation:
+
+  ```bash
+  claude-code --model gemma3 "Write unit tests for file X"
+  ```
 
 - If a model fails to run or uses too much VRAM, reduce `OLLAMA_CONTEXT_LENGTH` or use a smaller model
 

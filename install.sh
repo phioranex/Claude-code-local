@@ -182,14 +182,30 @@ ensure_local_bin() {
 create_wrapper() {
   local model="$1"
   local ctx="$2"
-  cat > "$LOCAL_BIN/claude-code" <<EOF
+  cat > "$LOCAL_BIN/claude-code" <<'EOF'
 #!/usr/bin/env bash
 # Wrapper to run chosen model with configured OLLAMA_CONTEXT_LENGTH
-export OLLAMA_CONTEXT_LENGTH=$ctx
-exec ollama run $model "\$@"
+# Usage: claude-code [--model MODEL|-m MODEL] [prompt...]
+MODEL_ENV=${CLAUDE_MODEL:-"$MODEL_PLACEHOLDER"}
+CTX_ENV=${OLLAMA_CONTEXT_LENGTH:-"$CTX_PLACEHOLDER"}
+
+# Simple arg parsing for model override
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model|-m)
+      MODEL_ENV="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+export OLLAMA_CONTEXT_LENGTH="$CTX_ENV"
+exec ollama run "$MODEL_ENV" "$@"
 EOF
+  # Replace placeholders with actual values
+  sed -i.bak "s|\$MODEL_PLACEHOLDER|$model|g; s|\$CTX_PLACEHOLDER|$ctx|g" "$LOCAL_BIN/claude-code" || true
+  rm -f "$LOCAL_BIN/claude-code.bak" || true
   chmod +x "$LOCAL_BIN/claude-code"
-  echo "Created wrapper: $LOCAL_BIN/claude-code -> runs model '$model' with context=$ctx"
+  echo "Created wrapper: $LOCAL_BIN/claude-code -> runs model '$model' with context=$ctx (override with --model or CLAUDE_MODEL)"
 }
 
 save_env() {
@@ -215,7 +231,37 @@ EOF
 pull_model() {
   local model="$1"
   echo "Pulling model: $model"
-  ollama pull "$model" || true
+  if ollama pull "$model"; then
+    echo "Model '$model' pulled successfully."
+    return 0
+  else
+    echo "Failed to pull model '$model'." >&2
+    return 1
+  fi
+}
+
+# Find a fallback model from the library or a built-in priority list
+select_available_model() {
+  local requested="$1"
+  local available
+  available=$(ollama library 2>/dev/null | awk '{print $1}' | tr -d '\r' || true)
+  # quick exact match
+  if echo "$available" | grep -x -q "$requested"; then
+    echo "$requested"
+    return 0
+  fi
+
+  # common prioritized fallbacks for code tasks
+  local fallbacks=("claude" "opencode" "qwen3-coder-next" "codellama" "gemma3" "mistral" "phi4" "codellama:7b" "gemma3:4b")
+  for f in "${fallbacks[@]}"; do
+    if echo "$available" | grep -x -q "$f"; then
+      echo "$f"
+      return 0
+    fi
+  done
+
+  # if none found, return empty
+  return 1
 }
 
 verify_ollama_installed() {
@@ -415,8 +461,21 @@ main() {
     echo "Non-interactive: model=$MODEL context=$CTX"
     echo "Proceeding with recommended automated install..."
     if [ -z "$GGUF_PATH" ]; then
+      # choose available model if the requested model isn't available
       if ensure_ollama_server_running; then
-        pull_model "$MODEL"
+        if verify_model_exists "$MODEL"; then
+          pull_model "$MODEL" || true
+        else
+          echo "Requested model '$MODEL' not found in library; searching for a suitable fallback..."
+          NEW_MODEL=$(select_available_model "$MODEL" ) || true
+          if [ -n "$NEW_MODEL" ]; then
+            echo "Using available model: $NEW_MODEL"
+            MODEL="$NEW_MODEL"
+            pull_model "$MODEL" || true
+          else
+            echo "No suitable model found automatically. You can run 'ollama library' to see available models and run 'ollama pull <model>' manually." >&2
+          fi
+        fi
       else
         echo "Warning: could not start Ollama server; skipping model pull. You can start it later with 'ollama serve' and run 'ollama pull $MODEL' manually." >&2
       fi
