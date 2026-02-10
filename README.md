@@ -17,23 +17,23 @@
 
 ## ⚡ One-line installer
 
-Paste this into your terminal to install (replace `YOUR_USER`/`YOUR_REPO` with this repo when published):
+Paste this into your terminal to install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
 ```
 
 This runs interactively by default. For automated installs (CI or scripts) use the non-interactive flags:
 
 ```bash
 # Non-interactive, recommended defaults (auto-detect context)
-curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --yes
 
 # Non-interactive with explicit model and context
-curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash -s -- --yes --model claude --context 32768
+curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --yes --model claude --context 32768
 
 # Import a local GGUF model and create an Ollama model (non-interactive)
-curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash -s -- --gguf /path/to/model.gguf --name mylocalmodel --yes
+curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --gguf /path/to/model.gguf --name mylocalmodel --yes
 ```
 
 Supported flags:
@@ -185,25 +185,14 @@ If you need to remove the installed wrapper and environment:
 curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash -s -- --uninstall
 
 # Non-interactive uninstall and also remove the named model
-curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash -s -- --uninstall --remove-model --model claude
+curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --uninstall --remove-model --model claude
 ```
 
 The uninstall command removes `~/.local/bin/claude-code`, `~/.claudecode_env`, shell rc references, and temporary GGUF working directories. If `--remove-model` is provided, the script will also attempt `ollama rm <model>` to remove the model from your local Ollama store.
 
 ---
 
-## Publishing to GitHub
-
-1. Replace `YOUR_USER/YOUR_REPO` in this README and `install.sh` with your GitHub path.
-2. Commit & push:
-
-```bash
-git add .
-git commit -m "Add one-line claude-code installer"
-git push
-```
-
-3. Users can then run the curl command shown above to install quickly.
+Repository: https://github.com/phioranex/Claude-code-local
 
 ---
 

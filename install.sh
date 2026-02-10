@@ -4,9 +4,9 @@ set -euo pipefail
 # Simple cross-platform installer for "Claude Code" via Ollama
 # Supports macOS, Linux, and provides instructions for Windows.
 # Interactive Recommended/Custom modes, with non-interactive (--yes/--ci) support.
-# Usage: curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
 # Non-interactive usage example:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/install.sh | bash -s -- --yes --model claude --context 32768
+#   curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --yes --model claude --context 32768
 
 REPO_URL="https://github.com/YOUR_USER/YOUR_REPO"
 LOCAL_BIN="$HOME/.local/bin"
