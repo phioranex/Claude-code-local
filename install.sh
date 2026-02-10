@@ -109,11 +109,12 @@ install_claude_cli() {
     fi
 
     log_step "Installing Claude Code CLI in $INSTALL_DIR/claude-cli..."
-    mkdir -p "$INSTALL_DIR/claude-cli"
-    python3 -m venv "$INSTALL_DIR/claude-cli/venv"
-    source "$INSTALL_DIR/claude-cli/venv/bin/activate"
-    pip install claude-cli
-    deactivate
+    # mkdir -p "$INSTALL_DIR/claude-cli"
+    # python3 -m venv "$INSTALL_DIR/claude-cli/venv"
+    # source "$INSTALL_DIR/claude-cli/venv/bin/activate"
+    # pip install claude-cli
+    curl -fsSL https://claude.ai/install.sh | bash
+    # deactivate
 
     log_success "Claude Code CLI installed successfully in $INSTALL_DIR/claude-cli."
 }
