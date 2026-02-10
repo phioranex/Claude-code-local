@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 # Default installation directory
 INSTALL_DIR="/usr/local/claude-code-local"
-
+STATE_DIR="$INSTALL_DIR/state"
 # Helper functions
 log_step() {
     echo -e "\n${BLUE}▶${NC} ${BOLD}$1${NC}"
@@ -113,7 +113,7 @@ install_claude_cli() {
     # python3 -m venv "$INSTALL_DIR/claude-cli/venv"
     # source "$INSTALL_DIR/claude-cli/venv/bin/activate"
     # pip install claude-cli
-    sudo curl -fsSL https://claude.ai/install.sh | bash
+    curl -fsSL https://claude.ai/install.sh | bash -- --state-dir "$STATE_DIR" --model gpt-oss --install-dir "$INSTALL_DIR"
     # deactivate
 
     log_success "Claude Code CLI installed successfully in $INSTALL_DIR/claude-cli."
