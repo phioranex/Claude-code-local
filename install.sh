@@ -486,6 +486,27 @@ main() {
   echo " - OLLAMA_CONTEXT_LENGTH is set in: $ENV_FILE and will be sourced in your shell rc"
   echo " - To run examples: claude-code 'Summarize this file'"
   echo " - Non-interactive usage: curl ... | bash -s -- --yes --model claude --context 32768"
+
+  # Helpful next steps (commands to run in your CURRENT shell if commands are not found)
+  echo
+  echo "If 'claude-code' or 'ollama' is not found in your current terminal, run the following in your shell to update your PATH immediately:"
+  echo
+  echo "  export PATH=\"$HOME/.local/bin:\$PATH\""
+  echo "  source $ENV_FILE"
+  echo
+  echo "To start the Ollama server in the background (so model pulls and runs work):"
+  echo
+  echo "  nohup ollama serve >/dev/null 2>&1 &"
+  echo
+  echo "Then pull the model (example):"
+  echo
+  echo "  ollama pull claude"
+  echo
+  echo "If you prefer to start a shell that sources your rc files (recommended), run:"
+  echo
+  echo "  exec \$SHELL"
+  echo
+  echo "If a model pull fails (manifest missing), check available models with: 'ollama library' and choose a supported model name."
 }
 
 main "$@"

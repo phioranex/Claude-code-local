@@ -164,6 +164,26 @@ echo "$msg" > .git/COMMIT_EDITMSG
 
 - To see running models: `ollama ps`
 - To list local models: `ollama list`
+- If `claude-code` or `ollama` is not available immediately after running the installer, it is likely because your shell hasn't picked up the PATH change written to your shell rc. In your current shell run:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+source ~/.claudecode_env
+# or restart your shell with
+exec $SHELL
+```
+
+- If a model pull failed with "pull model manifest: file does not exist", start the Ollama server and try pulling manually:
+
+```bash
+# start server in background
+nohup ollama serve >/dev/null 2>&1 &
+# pull the model
+ollama pull claude
+# check available models if pull fails
+ollama library
+```
+
 - If a model fails to run or uses too much VRAM, reduce `OLLAMA_CONTEXT_LENGTH` or use a smaller model
 
 ---
