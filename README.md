@@ -17,9 +17,13 @@
 
 ## ⚡ One-line installer
 
-Paste this into your terminal to install:
+Paste this into your terminal to install (recommended: process substitution — safer than piping directly):
 
 ```bash
+# Safer: process substitution (recommended)
+bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) -- --yes --model claude --context 32768
+
+# Old style: pipe to bash (still supported)
 curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
 ```
 

@@ -4,9 +4,9 @@ set -euo pipefail
 # Simple cross-platform installer for "Claude Code" via Ollama
 # Supports macOS, Linux, and provides instructions for Windows.
 # Interactive Recommended/Custom modes, with non-interactive (--yes/--ci) support.
-# Usage: curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
-# Non-interactive usage example:
-#   curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash -s -- --yes --model claude --context 32768
+# Usage (pipe): curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
+# Usage (process substitution, preferred for safety): bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) -- --yes --model claude --context 32768
+# Note: When using process substitution, pass arguments directly after the command (examples above).
 
 REPO_URL="https://github.com/phioranex/Claude-code-local"
 LOCAL_BIN="$HOME/.local/bin"
@@ -39,6 +39,16 @@ Options:
   --help                           Show this help message
 EOF
 } 
+
+# Ensure we're running under bash for consistent behavior (re-exec if possible)
+if [ -z "${BASH_VERSION-}" ]; then
+  if command_exists bash; then
+    echo "Re-executing installer with bash for compatibility..."
+    exec bash "$0" "$@"
+  else
+    echo "Warning: bash not found — script works best with bash features. Continuing anyway..." >&2
+  fi
+fi
 
 # Parse args
 while [[ $# -gt 0 ]]; do
