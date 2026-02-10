@@ -113,7 +113,7 @@ install_claude_cli() {
     # python3 -m venv "$INSTALL_DIR/claude-cli/venv"
     # source "$INSTALL_DIR/claude-cli/venv/bin/activate"
     # pip install claude-cli
-    curl -fsSL https://claude.ai/install.sh | bash
+    sudo curl -fsSL https://claude.ai/install.sh | bash
     # deactivate
 
     log_success "Claude Code CLI installed successfully in $INSTALL_DIR/claude-cli."
