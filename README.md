@@ -8,10 +8,16 @@ Easily set up local development tools for coding with an AI assistant. This scri
 
 ## Install
 
-Run this one-liner to install everything:
+Run this one-liner to install everything (adjust `--install-dir` if needed):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh)
+```
+
+If you want to install on diffrent directory use following command:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) --install-dir /path/to/external/drive
 ```
 
 ### Prerequisites
@@ -47,11 +53,24 @@ Command:
   claude-cli --model=gpt-oss 'Write a Python loop that iterates over a list.'
   ```
 
+### Custom Directory
+
+If you wish to install GPT-OSS and Claude Code CLI to a custom location (e.g., external drive):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) --install-dir /Volumes/SSD/LLM
+```
+
+This will configure both tools to use the specified directory.
+
 ## Troubleshooting
 
-If you run into issues:
 1. **Dependencies not found:** Verify Docker, Node.js, and Python are installed.
 2. **Model pull fails:** Ensure system resources (disk, RAM) are sufficient.
+3. **Ollama error `unknown command "daemon"`:** Most likely a versioning issue. Run:
+   ```bash
+   ollama reset --storage /path/to/external/drive
+   ```
 
 ## License
 
