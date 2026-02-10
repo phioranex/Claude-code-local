@@ -1,571 +1,119 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
-# Simple cross-platform installer for "Claude Code" via Ollama
-# Supports macOS, Linux, and provides instructions for Windows.
-# Interactive Recommended/Custom modes, with non-interactive (--yes/--ci) support.
-# Usage (pipe): curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
-# Usage (process substitution, preferred for safety): bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) -- --yes --model claude --context 32768
-# Note: When using process substitution, pass arguments directly after the command (examples above).
+# Claude Code Local - One-line installer
+#
+# Usage:
+# curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh | bash
 
-REPO_URL="https://github.com/phioranex/Claude-code-local"
-LOCAL_BIN="$HOME/.local/bin"
-ENV_FILE="$HOME/.claudecode_env"
+set -e
 
-# Flags / defaults
-NON_INTERACTIVE=0
-UNINSTALL=0            # If set, perform uninstall actions and exit
-REMOVE_MODEL=0         # If set (or --remove-model), also remove the pulled/created Ollama model
-MODE_OVERRIDE=""
-MODEL_FLAG=""
-CTX_FLAG=""
-GGUF_PATH=""
-GGUF_NAME=""
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
 
-command_exists() { command -v "$1" >/dev/null 2>&1; }
-
-print_help() {
-  cat <<'EOF'
-Usage: install.sh [options]
-
-Options:
-  --yes, --ci, --non-interactive   Run with defaults (Recommended mode) and skip prompts
-  --model <name>                   Pre-select a model (e.g., 'claude' or a created model name)
-  --context <tokens>               Pre-select context size (e.g., 4096, 32768)
-  --gguf <path>                    Import a local GGUF model and create an Ollama model from it
-  --name <model_name>              Name to use when creating a model from a GGUF file
-  --uninstall                      Remove installed wrapper and env; optionally remove model with --remove-model
-  --remove-model                   When used with --uninstall, also remove the pulled/created Ollama model(s)
-  --help                           Show this help message
-EOF
-} 
-
-# Ensure we're running under bash for consistent behavior (re-exec if possible)
-if [ -z "${BASH_VERSION-}" ]; then
-  if command_exists bash; then
-    echo "Re-executing installer with bash for compatibility..."
-    exec bash "$0" "$@"
-  else
-    echo "Warning: bash not found — script works best with bash features. Continuing anyway..." >&2
-  fi
-fi
-
-# Parse args
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --yes|--ci|--non-interactive|-y) NON_INTERACTIVE=1; shift ;;
-    --model) MODEL_FLAG="$2"; shift 2 ;;
-    --context) CTX_FLAG="$2"; shift 2 ;;
-    --gguf) GGUF_PATH="$2"; shift 2 ;;
-    --name) GGUF_NAME="$2"; shift 2 ;;
-    --uninstall) UNINSTALL=1; shift ;;
-    --remove-model) REMOVE_MODEL=1; shift ;;
-    --help) print_help; exit 0 ;;
-    *) echo "Unknown argument: $1"; print_help; exit 1 ;;
-  esac
-done
-
-# Respect environment CI variable (common in CI systems)
-if [ "${CI:-}" = "true" ] || [ "${CI:-}" = "1" ]; then
-  NON_INTERACTIVE=1
-fi
-
-
-detect_os() {
-  UNAME=$(uname -s)
-  case "$UNAME" in
-    Darwin) echo "macos" ;;
-    Linux) echo "linux" ;;
-    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
-    *) echo "unknown" ;;
-  esac
+# Helper functions
+log_step() {
+    echo -e "\n${BLUE}▶${NC} ${BOLD}$1${NC}"
 }
 
-install_ollama_macos() {
-  # Try Homebrew first when available
-  if command_exists brew; then
-    BREW_PREFIX=$(brew --prefix 2>/dev/null || true)
-    if [ -n "$BREW_PREFIX" ] && [ -w "$BREW_PREFIX" ]; then
-      echo "Attempting to install Ollama with Homebrew..."
-      if brew install ollama; then
-        echo "Homebrew install succeeded."
+log_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+check_command() {
+    if command -v "$1" &> /dev/null; then
+        log_success "$1 found"
         return 0
-      else
-        echo "Homebrew install failed; falling back to local user install in $LOCAL_BIN"
-      fi
     else
-      echo "Homebrew detected at $BREW_PREFIX but it is not writable by this user; falling back to local user install in $LOCAL_BIN"
+        log_warning "$1 not found"
+        return 1
     fi
-  else
-    echo "Homebrew not found. Falling back to direct download and local install in $LOCAL_BIN"
-  fi
+}
 
-  # Ensure local bin exists
-  ensure_local_bin
-
-  TMPDIR=$(mktemp -d)
-  echo "Downloading Ollama release to $TMPDIR ..."
-  if curl -fsSL -o "$TMPDIR/ollama-darwin.tgz" "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.tgz"; then
-    tar -xzf "$TMPDIR/ollama-darwin.tgz" -C "$TMPDIR"
-    if [ -f "$TMPDIR/ollama" ]; then
-      mv "$TMPDIR/ollama" "$LOCAL_BIN/ollama" || cp "$TMPDIR/ollama" "$LOCAL_BIN/ollama"
-      chmod +x "$LOCAL_BIN/ollama"
-      echo "Installed Ollama to $LOCAL_BIN/ollama"
-    else
-      echo "Downloaded archive did not contain 'ollama' binary; aborting." >&2
-      rm -rf "$TMPDIR"; return 1
+# Functions for installation
+install_ollama() {
+    log_step "Installing Ollama runtime..."
+    if check_command ollama; then
+        echo "Ollama is already installed."
+        return
     fi
-    rm -rf "$TMPDIR"
-    return 0
-  else
-    echo "Failed to download Ollama release." >&2
-    rm -rf "$TMPDIR"; return 1
-  fi
+    # Install Ollama (Linux/Mac only)
+    curl -fsSL https://ollama.ai/install.sh | bash
+    log_success "Ollama installed successfully."
 }
 
-install_ollama_linux() {
-  echo "Running Ollama official installer (requires sudo for system install)..."
-  curl -fsSL https://ollama.com/install.sh | sh
-}
-
-install_ollama_windows() {
-  local psfile="$PWD/install-windows.ps1"
-  cat > "$psfile" <<'PS'
-# PowerShell script to download and run Ollama installer
-$installer = "$env:TEMP\\OllamaSetup.exe"
-Invoke-WebRequest -Uri "https://ollama.com/download/OllamaSetup.exe" -OutFile $installer
-Start-Process -FilePath $installer -Wait -Verb RunAs
-PS
-  echo "Windows helper created: $psfile"
-  echo "Run in an elevated PowerShell: Set-ExecutionPolicy Bypass -Scope Process -Force; .\install-windows.ps1"
-}
-
-suggest_context_by_vram() {
-  # Try to detect GPU VRAM (nvidia-smi friendly). Fallback to default.
-  local vram_gb=0
-  if command_exists nvidia-smi; then
-    vram_gb=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n1)
-    vram_gb=$(( (vram_gb + 1023) / 1024 ))
-  elif [ "$(uname -s)" = "Darwin" ]; then
-    # macOS: try system_profiler
-    vram_gb=$(system_profiler SPDisplaysDataType 2>/dev/null | awk '/VRAM/ {print $NF; exit}' | tr -d 'G') || true
-  fi
-  if [ -z "$vram_gb" ] || [ "$vram_gb" -lt 1 ]; then
-    echo 4096
-  elif [ "$vram_gb" -lt 24 ]; then
-    echo 4096
-  elif [ "$vram_gb" -lt 48 ]; then
-    echo 32768
-  else
-    echo 262144
-  fi
-}
-
-ensure_local_bin() {
-  mkdir -p "$LOCAL_BIN"
-  case ":$PATH:" in
-    *":$LOCAL_BIN:"*) ;;
-    *)
-      echo "Adding $LOCAL_BIN to your PATH in shell rc..."
-      if [ -n "${ZSH_VERSION-}" ]; then
-        echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$HOME/.zshrc"
-      elif [ -n "${BASH_VERSION-}" ]; then
-        echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$HOME/.bashrc"
-      else
-        echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$HOME/.profile"
-      fi
-      export PATH="$LOCAL_BIN:$PATH"
-      ;;
-  esac
-}
-
-create_wrapper() {
-  local model="$1"
-  local ctx="$2"
-  cat > "$LOCAL_BIN/claude-code" <<'EOF'
-#!/usr/bin/env bash
-# Wrapper to run chosen model with configured OLLAMA_CONTEXT_LENGTH
-# Usage: claude-code [--model MODEL|-m MODEL] [prompt...]
-MODEL_ENV=${CLAUDE_MODEL:-"$MODEL_PLACEHOLDER"}
-CTX_ENV=${OLLAMA_CONTEXT_LENGTH:-"$CTX_PLACEHOLDER"}
-
-# Simple arg parsing for model override
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --model|-m)
-      MODEL_ENV="$2"; shift 2 ;;
-    *) break ;;
-  esac
-done
-
-export OLLAMA_CONTEXT_LENGTH="$CTX_ENV"
-exec ollama run "$MODEL_ENV" "$@"
-EOF
-  # Replace placeholders with actual values
-  sed -i.bak "s|\$MODEL_PLACEHOLDER|$model|g; s|\$CTX_PLACEHOLDER|$ctx|g" "$LOCAL_BIN/claude-code" || true
-  rm -f "$LOCAL_BIN/claude-code.bak" || true
-  chmod +x "$LOCAL_BIN/claude-code"
-  echo "Created wrapper: $LOCAL_BIN/claude-code -> runs model '$model' with context=$ctx (override with --model or CLAUDE_MODEL)"
-}
-
-save_env() {
-  local ctx="$1"
-  cat > "$ENV_FILE" <<EOF
-# claude-code local environment
-export OLLAMA_CONTEXT_LENGTH=$ctx
-EOF
-  # source into current shell when possible
-  if [ -n "${ZSH_VERSION-}" ]; then
-    SHELL_RC="$HOME/.zshrc"
-  elif [ -n "${BASH_VERSION-}" ]; then
-    SHELL_RC="$HOME/.bashrc"
-  else
-    SHELL_RC="$HOME/.profile"
-  fi
-  if ! grep -q "source $ENV_FILE" "$SHELL_RC" 2>/dev/null; then
-    echo "source $ENV_FILE" >> "$SHELL_RC"
-    echo "Appended 'source $ENV_FILE' to $SHELL_RC"
-  fi
-}
-
-pull_model() {
-  local model="$1"
-  echo "Pulling model: $model"
-  if ollama pull "$model"; then
-    echo "Model '$model' pulled successfully."
-    return 0
-  else
-    echo "Failed to pull model '$model'." >&2
-    return 1
-  fi
-}
-
-# Find a fallback model from the library or a built-in priority list
-select_available_model() {
-  local requested="$1"
-  local available
-  available=$(ollama library 2>/dev/null | awk '{print $1}' | tr -d '\r' || true)
-  # quick exact match
-  if echo "$available" | grep -x -q "$requested"; then
-    echo "$requested"
-    return 0
-  fi
-
-  # common prioritized fallbacks for code tasks
-  local fallbacks=("claude" "opencode" "qwen3-coder-next" "codellama" "gemma3" "mistral" "phi4" "codellama:7b" "gemma3:4b")
-  for f in "${fallbacks[@]}"; do
-    if echo "$available" | grep -x -q "$f"; then
-      echo "$f"
-      return 0
-    fi
-  done
-
-  # if none found, return empty
-  return 1
-}
-
-verify_ollama_installed() {
-  if ! command_exists ollama; then
-    echo "Error: 'ollama' not found in PATH." >&2
-    return 1
-  fi
-  # Print version if available
-  echo "Ollama available: $(ollama --version 2>/dev/null || echo 'version unknown')"
-  return 0
-}
-
-# Import a local GGUF and create an Ollama model from it
-handle_gguf_import() {
-  local gguf="$1"
-  local name="$2"
-  if [ ! -f "$gguf" ]; then
-    echo "GGUF file not found: $gguf" >&2
-    return 1
-  fi
-  local base
-  base=$(basename "$gguf")
-  local target_dir="$PWD/claude-code-gguf"
-  mkdir -p "$target_dir"
-  cp -f "$gguf" "$target_dir/$base"
-  cat > "$target_dir/Modelfile" <<EOF
-FROM ./$base
-EOF
-  if [ -z "$name" ]; then
-    name="${base%.*}"
-  fi
-  echo "Creating Ollama model '$name' from $base..."
-  pushd "$target_dir" >/dev/null
-  ollama create "$name" -f ./Modelfile || true
-  popd >/dev/null
-  if ollama list | grep -E "\b${name}\b" >/dev/null 2>&1; then
-    echo "GGUF model '$name' created successfully."
-    echo "$name"
-    return 0
-  else
-    echo "Failed to create model from GGUF." >&2
-    return 1
-  fi
-}
-
-# Check if a model exists locally in Ollama
-verify_model_exists() {
-  local model="$1"
-  if ollama list | grep -E "\b${model}\b" >/dev/null 2>&1; then
-    return 0
-  fi
-  return 1
-}
-
-# Ensure Ollama server is running (start it in the background if needed)
-ensure_ollama_server_running() {
-  # Quick check: 'ollama list' should return exit 0 when server is reachable
-  if ollama list >/dev/null 2>&1; then
-    return 0
-  fi
-
-  echo "Ollama server not running; attempting to start 'ollama serve' in background..."
-  # Start in background; do not block the script. Use nohup to avoid SIGHUP termination.
-  nohup ollama serve >/dev/null 2>&1 &
-  local start_time
-  start_time=$(date +%s)
-  local timeout=30
-  while true; do
-    if ollama list >/dev/null 2>&1; then
-      echo "Ollama server started."
-      return 0
-    fi
-    if [ $(( $(date +%s) - start_time )) -gt $timeout ]; then
-      echo "Timed out waiting for Ollama server to start (waited ${timeout}s)." >&2
-      return 1
-    fi
-    sleep 1
-  done
-}
-
-# Remove a specific line (pattern) from a file safely
-remove_line_from_file() {
-  local file="$1" pattern="$2"
-  if [ ! -f "$file" ]; then
-    return 0
-  fi
-  local tmp
-  tmp=$(mktemp)
-  grep -v "$pattern" "$file" > "$tmp" || true
-  mv "$tmp" "$file"
-  echo "Cleaned up $file"
-}
-
-# Uninstall routine: removes wrapper, env, rc entries and optional model(s)
-uninstall() {
-  echo "Starting uninstall..."
-  if [ -f "$LOCAL_BIN/claude-code" ]; then
-    rm -f "$LOCAL_BIN/claude-code"
-    echo "Removed wrapper: $LOCAL_BIN/claude-code"
-  else
-    echo "Wrapper not found: $LOCAL_BIN/claude-code"
-  fi
-
-  if [ -f "$ENV_FILE" ]; then
-    rm -f "$ENV_FILE"
-    echo "Removed environment file: $ENV_FILE"
-  fi
-
-  # Remove references from shell RC files
-  for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
-    remove_line_from_file "$rc" "source $ENV_FILE"
-    remove_line_from_file "$rc" "export PATH=\"$LOCAL_BIN:\\$PATH\""
-  done
-
-  # Remove the GGUF working directory (if present)
-  if [ -d "$PWD/claude-code-gguf" ]; then
-    rm -rf "$PWD/claude-code-gguf"
-    echo "Removed temporary GGUF working directory: $PWD/claude-code-gguf"
-  fi
-
-  # Optionally remove the model(s) via Ollama
-  if [ "$REMOVE_MODEL" -eq 1 ]; then
-    if command_exists ollama; then
-      echo "Removing model(s) via 'ollama rm'..."
-      if [ -n "$MODEL_FLAG" ]; then
-        ollama rm "$MODEL_FLAG" || true
-        echo "Requested removal of model: $MODEL_FLAG"
-      else
-        # Ask which model to remove
-        echo "Models on this machine:"
-        ollama list || true
-        read -rp "Type the model name you want to remove (or leave blank to skip): " toremove
-        if [ -n "$toremove" ]; then
-          ollama rm "$toremove" || true
-          echo "Removed model: $toremove"
-        else
-          echo "No model selected for removal."
-        fi
-      fi
-    else
-      echo "ollama not found; cannot remove model via ollama." >&2
-    fi
-  fi
-
-  echo "Uninstall complete."
-}
-
-main() {
-  OS=$(detect_os)
-  echo "Detected OS: $OS"
-
-  # If uninstall flag was provided, run uninstall and exit
-  if [ "$UNINSTALL" -eq 1 ]; then
-    uninstall
-    exit 0
-  fi
-
-  if [ "$OS" = "windows" ]; then
-    install_ollama_windows
-    echo "Please run the generated PowerShell script in an elevated session to install Ollama, then re-run this installer (or run this script from WSL)."
-    exit 0
-  fi
-
-  if ! command_exists ollama; then
-    echo "Ollama not found, installing..."
-    if [ "$OS" = "macos" ]; then
-      install_ollama_macos
-    elif [ "$OS" = "linux" ]; then
-      install_ollama_linux
-    else
-      echo "Unsupported OS: $OS" >&2; exit 1
+install_gpt_oss_model() {
+    log_step "Downloading GPT-OSS model in Ollama..."
+    if ! check_command ollama; then
+        log_error "Ollama is not installed. Please install it first."
+        exit 1
     fi
 
-    if ! verify_ollama_installed; then
-      echo "Ollama installation failed. Please install manually: https://ollama.com/download" >&2
-      exit 1
-    fi
-  else
-    echo "Ollama already installed: $(ollama --version 2>/dev/null || true)"
-  fi
-
-  # If GGUF import requested, handle it (creates an Ollama model locally)
-  if [ -n "$GGUF_PATH" ]; then
-    CREATED_MODEL=$(handle_gguf_import "$GGUF_PATH" "$GGUF_NAME") || { echo 'GGUF import failed.'; exit 1; }
-    MODEL="$CREATED_MODEL"
-  fi
-
-  # Non-interactive flow
-  if [ "$NON_INTERACTIVE" -eq 1 ]; then
-    MODE=1
-    if [ -n "$MODEL_FLAG" ]; then
-      MODEL="$MODEL_FLAG"
-    else
-      MODEL=${MODEL:-claude}
-    fi
-    CTX=${CTX_FLAG:-$(suggest_context_by_vram)}
-    echo "Non-interactive: model=$MODEL context=$CTX"
-    echo "Proceeding with recommended automated install..."
-    if [ -z "$GGUF_PATH" ]; then
-      # choose available model if the requested model isn't available
-      if ensure_ollama_server_running; then
-        if verify_model_exists "$MODEL"; then
-          pull_model "$MODEL" || true
-        else
-          echo "Requested model '$MODEL' not found in library; searching for a suitable fallback..."
-          NEW_MODEL=$(select_available_model "$MODEL" ) || true
-          if [ -n "$NEW_MODEL" ]; then
-            echo "Using available model: $NEW_MODEL"
-            MODEL="$NEW_MODEL"
-            pull_model "$MODEL" || true
-          else
-            echo "No suitable model found automatically. You can run 'ollama library' to see available models and run 'ollama pull <model>' manually." >&2
-          fi
-        fi
-      else
-        echo "Warning: could not start Ollama server; skipping model pull. You can start it later with 'ollama serve' and run 'ollama pull $MODEL' manually." >&2
-      fi
-    fi
-    ensure_local_bin
-    create_wrapper "$MODEL" "$CTX"
-    save_env "$CTX"
-
-  else
-    echo
-    echo "Choose installation mode:"
-    echo "  1) Recommended (auto-detect best context, install 'claude' and create wrapper)"
-    echo "  2) Custom (choose model and context)"
-    read -rp "Type 1 or 2 (default 1): " MODE
-    MODE=${MODE:-1}
-
-    if [ "$MODE" = "1" ]; then
-      MODEL=${MODEL_FLAG:-claude}
-      CTX=${CTX_FLAG:-$(suggest_context_by_vram)}
-      echo "Recommended: model=$MODEL context=$CTX"
-      read -rp "Proceed? [Y/n] " proceed
-      proceed=${proceed:-Y}
-      if [[ "$proceed" =~ ^[Yy] ]]; then
-        echo "Pulling and setting up recommended configuration..."
-        if [ -z "$GGUF_PATH" ]; then
-          pull_model "$MODEL"
-        fi
-        ensure_local_bin
-        create_wrapper "$MODEL" "$CTX"
-        save_env "$CTX"
-        echo "Ready! Use 'claude-code' to run the model (it will set the context for you)."
-      else
-        echo "Aborted by user."; exit 0
-      fi
-    else
-      read -rp "Model name (as understood by Ollama, e.g. 'claude' or 'opencode') [${MODEL_FLAG:-claude}]: " MODEL
-      MODEL=${MODEL:-${MODEL_FLAG:-claude}}
-      read -rp "Context size in tokens (e.g. 4096, 32768) [auto]: " CTX
-      if [ -z "$CTX" ]; then
-        CTX=${CTX_FLAG:-$(suggest_context_by_vram)}
-        echo "Auto-detected context: $CTX"
-      fi
-      read -rp "Pull the model now? [Y/n]: " pullnow
-      pullnow=${pullnow:-Y}
-      if [[ "$pullnow" =~ ^[Yy] ]]; then
-        if ensure_ollama_server_running; then
-          pull_model "$MODEL"
-        else
-          echo "Warning: could not start Ollama server; skipping model pull. You can start it later with 'ollama serve' and run 'ollama pull $MODEL' manually." >&2
-        fi
-      fi
-      ensure_local_bin
-      create_wrapper "$MODEL" "$CTX"
-      save_env "$CTX"
-      echo "Custom install complete. Use 'claude-code' to run $MODEL with context=$CTX"
-    fi
-  fi
-
-  # Verify model is available
-  if ! verify_model_exists "${MODEL}"; then
-    echo "Warning: model '${MODEL}' not present in 'ollama list'. It may still be creating/processing; check 'ollama list' or 'ollama show ${MODEL}'." >&2
-  fi
-
-  echo
-  echo "Notes:"
-  echo " - The installer created: $LOCAL_BIN/claude-code"
-  echo " - OLLAMA_CONTEXT_LENGTH is set in: $ENV_FILE and will be sourced in your shell rc"
-  echo " - To run examples: claude-code 'Summarize this file'"
-  echo " - Non-interactive usage: curl ... | bash -s -- --yes --model claude --context 32768"
-
-  # Helpful next steps (commands to run in your CURRENT shell if commands are not found)
-  echo
-  echo "If 'claude-code' or 'ollama' is not found in your current terminal, run the following in your shell to update your PATH immediately:"
-  echo
-  echo "  export PATH=\"$HOME/.local/bin:\$PATH\""
-  echo "  source $ENV_FILE"
-  echo
-  echo "To start the Ollama server in the background (so model pulls and runs work):"
-  echo
-  echo "  nohup ollama serve >/dev/null 2>&1 &"
-  echo
-  echo "Then pull the model (example):"
-  echo
-  echo "  ollama pull claude"
-  echo
-  echo "If you prefer to start a shell that sources your rc files (recommended), run:"
-  echo
-  echo "  exec \$SHELL"
-  echo
-  echo "If a model pull fails (manifest missing), check available models with: 'ollama library' and choose a supported model name."
+    ollama pull gpt-oss
+    log_success "GPT-OSS model installed successfully in Ollama."
 }
 
-main "$@"
+install_claude_cli() {
+    log_step "Installing Claude Code CLI..."
+    if check_command claude-cli; then
+        echo "Claude Code CLI is already installed."
+        return
+    fi
+    # Install Claude Code CLI (assumption: it's installed via pip)
+    pip install claude-cli
+    log_success "Claude Code CLI installed successfully."
+}
+
+# Main setup
+log_step "Starting installation for Claude Code Local."
+
+# Install prerequisites
+log_step "Ensuring required dependencies (Docker, Node.js, Python)..."
+if ! check_command docker; then
+    log_error "Docker is required but not installed. Install Docker: https://docs.docker.com/get-docker/"
+    exit 1
+fi
+
+if ! check_command node; then
+    log_error "Node.js is required but not installed. Install Node.js: https://nodejs.org/"
+    exit 1
+fi
+
+if ! check_command python3; then
+    log_error "Python 3 is required but not installed. Install Python: https://www.python.org/downloads/"
+    exit 1
+fi
+
+log_success "All dependencies are installed."
+
+# Install components
+install_ollama
+install_gpt_oss_model
+install_claude_cli
+
+log_step "Setup completed."
+echo -e "\n${GREEN}🎉 All tools installed successfully! 🎉${NC}"
+
+echo -e "${BOLD}Tools installed:${NC}"
+echo -e "  - ${CYAN}Ollama${NC}"
+echo -e "      ↳ Includes GPT-OSS model for Claude Code CLI."
+echo -e "  - ${CYAN}Claude Code CLI${NC}"
+
+echo -e "\n${BOLD}Next steps:${NC}"
+echo -e "  1. Test Ollama:         ${CYAN}ollama chat gpt-oss${NC}"
+echo -e "  2. Test Claude CLI:     ${CYAN}claude-cli --model=gpt-oss 'Write a Python loop that iterates over a list.'${NC}"
+
+echo -e "\n${YELLOW}Happy coding! 🚀${NC}"
