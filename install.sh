@@ -16,9 +16,8 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-# Default installation directory
-INSTALL_DIR="/usr/local/claude-code-local"
-STATE_DIR="$INSTALL_DIR/state"
+# Default behaviour: perform native installs (no custom install directory)
+# The bootstrap installers will place binaries under user-local locations (e.g. ~/.local/bin)
 # Helper functions
 log_step() {
     echo -e "\n${BLUE}▶${NC} ${BOLD}$1${NC}"
@@ -49,19 +48,12 @@ check_command() {
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --install-dir)
-                INSTALL_DIR="$2"
-                STATE_DIR="$INSTALL_DIR/state"
-                shift 2
-                ;;
             --help|-h)
                 echo "Install Claude Code Local"
                 echo ""
-                echo "Usage: install.sh [OPTIONS]"
+                echo "Usage: install.sh"
                 echo ""
-                echo "Options:"
-                echo "  --install-dir DIR   Specify custom installation directory (default: /usr/local/claude-code-local)"
-                echo "  --help, -h          Show this help message"
+                echo "This script installs Ollama, pulls the gpt-oss model, and installs the Claude CLI natively."
                 exit 0
                 ;;
             *)
@@ -84,17 +76,85 @@ install_ollama() {
 }
 
 configure_ollama() {
-    log_step "Configuring Ollama to use custom directory..."
-    mkdir -p "$INSTALL_DIR/ollama"
-
-    # Some ollama versions expose different commands. Check if 'daemon' is supported.
+    log_step "Configuring Ollama (native install)..."
+    # Some ollama versions expose different commands. If 'daemon' is available, start it.
     if ollama --help 2>&1 | grep -q "daemon"; then
-        ollama daemon --storage "$INSTALL_DIR/ollama" &
+        ollama daemon &
         sleep 2
-        log_success "Ollama configured to use $INSTALL_DIR/ollama for model storage."
+        log_success "Ollama daemon started (native)."
     else
-        log_warning "'ollama daemon' command not available; skipping auto-start. Ensure Ollama is running and using $INSTALL_DIR/ollama as storage if required."
+        log_warning "'ollama daemon' command not available; skipping auto-start. Ensure Ollama is running."
     fi
+}
+
+ensure_ollama_running() {
+    log_step "Checking Ollama server on 127.0.0.1:11434..."
+    # Quick health check via curl
+    if command -v curl >/dev/null 2>&1 && curl -sS http://127.0.0.1:11434/ >/dev/null 2>&1; then
+        log_success "Ollama API is responding on 127.0.0.1:11434"
+        return 0
+    fi
+
+    # Fallback: check for running process (Ollama app or binary)
+    if pgrep -x Ollama >/dev/null 2>&1 || pgrep -f "\bollama\b" >/dev/null 2>&1; then
+        log_success "Ollama process detected"
+        return 0
+    fi
+
+    log_warning "Ollama not running — attempting to start it (background)..."
+    # Try to start Ollama serve (native) and keep it detached
+    if command -v ollama >/dev/null 2>&1; then
+        if ollama --help 2>&1 | grep -q "serve"; then
+            nohup ollama serve --port 11434 >/dev/null 2>&1 &
+        else
+            nohup ollama serve >/dev/null 2>&1 &
+        fi
+        sleep 3
+        if command -v curl >/dev/null 2>&1 && curl -sS http://127.0.0.1:11434/ >/dev/null 2>&1; then
+            log_success "Ollama started and is listening on 127.0.0.1:11434"
+            return 0
+        else
+            log_warning "Attempted to start Ollama but it did not respond on port 11434."
+            return 1
+        fi
+    else
+        log_error "'ollama' command not available; cannot start Ollama automatically."
+        return 1
+    fi
+}
+
+add_shell_exports() {
+    # Determine rc file to modify
+    RCFILE="$HOME/.bashrc"
+    if [ -n "$SHELL" ] && echo "$SHELL" | grep -q "zsh"; then
+        RCFILE="$HOME/.zshrc"
+    fi
+
+    log_step "Adding PATH and environment variables to $RCFILE (if missing)..."
+    mkdir -p "$(dirname "$RCFILE")"
+
+    add_line_if_missing() {
+        local file="$1"; shift
+        local line="$*"
+        if ! grep -Fxq "$line" "$file" 2>/dev/null; then
+            echo "$line" >> "$file"
+        fi
+    }
+
+    add_line_if_missing "$RCFILE" "# Claude Code Local additions"
+    add_line_if_missing "$RCFILE" "export PATH=\"$HOME/.local/bin:\$PATH\""
+    add_line_if_missing "$RCFILE" "# Ollama / Claude CLI (Anthropic-compatible) settings"
+    add_line_if_missing "$RCFILE" "export ANTHROPIC_API_URL=\"http://127.0.0.1:11434\""
+    add_line_if_missing "$RCFILE" "export ANTHROPIC_API_BASE=\"http://127.0.0.1:11434\""
+    add_line_if_missing "$RCFILE" "export ANTHROPIC_MODEL=\"gpt-oss\""
+
+    # Export into current session as well
+    export PATH="$HOME/.local/bin:$PATH"
+    export ANTHROPIC_API_URL="http://127.0.0.1:11434"
+    export ANTHROPIC_API_BASE="http://127.0.0.1:11434"
+    export ANTHROPIC_MODEL="gpt-oss"
+
+    log_success "Updated $RCFILE — restart your shell or source it to get changes."
 }
 
 install_gpt_oss_model() {
@@ -115,19 +175,34 @@ install_claude_cli() {
         return
     fi
 
-    log_step "Preparing installation directory and state dir..."
-    mkdir -p "$INSTALL_DIR/claude-cli"
-    mkdir -p "$STATE_DIR"
+    log_step "Preparing user-local directories and running Claude bootstrap installer..."
 
-    log_step "Running official Claude Code bootstrap installer (no extra flags)..."
-    # Ensure the installer uses our desired state directory by setting XDG_STATE_HOME.
-    export XDG_STATE_HOME="$STATE_DIR"
-    mkdir -p "$STATE_DIR"
+    # Ensure user-local state and bin directories exist
+    mkdir -p "$HOME/.local/state" "$HOME/.local/bin" 2>/dev/null || true
 
-    # Try the bootstrap installer (target: latest). If it fails due to permission errors,
-    # we'll fall back to downloading the binary directly and invoking it with flags.
-    if ! XDG_STATE_HOME="$STATE_DIR" curl -fsSL https://claude.ai/install.sh | bash -s -- latest; then
-        log_warning "Bootstrap installer failed; attempting fallback: download binary and run with explicit flags..."
+    # If the state directory is not writable by the current user, attempt to fix ownership
+    if [ ! -w "$HOME/.local/state" ]; then
+        log_warning "$HOME/.local/state is not writable by the current user. Attempting to fix ownership with sudo..."
+        if command -v sudo >/dev/null 2>&1; then
+            sudo chown -R "$(id -u):$(id -g)" "$HOME/.local" || {
+                log_error "Failed to chown $HOME/.local. Fix permissions manually and re-run the installer.";
+                exit 1
+            }
+            mkdir -p "$HOME/.local/state" "$HOME/.local/bin" || {
+                log_error "Failed to create $HOME/.local/state after fixing ownership."
+                exit 1
+            }
+            log_success "Fixed ownership of $HOME/.local and created required dirs."
+        else
+            log_error "$HOME/.local/state is not writable and sudo is not available. Fix permissions manually and re-run.";
+            exit 1
+        fi
+    fi
+
+    # Try the bootstrap installer (target: latest). If it fails, fall back to downloading
+    # the platform binary and running its installer.
+    if ! curl -fsSL https://claude.ai/install.sh | bash -s -- latest; then
+        log_warning "Bootstrap installer failed; attempting fallback: download binary and run installer..."
 
         TMPDIR=$(mktemp -d)
         trap 'rm -rf "$TMPDIR"' EXIT
@@ -162,32 +237,38 @@ install_claude_cli() {
         fi
         chmod +x "$binary_path"
 
-        # Run the binary install with explicit state dir and model
-        if ! "$binary_path" install --state-dir "$STATE_DIR" --model gpt-oss; then
+        # Run the binary installer (no custom state dir) for the detected platform
+        if ! "$binary_path" install latest; then
             log_error "Manual claude install failed."; exit 1
         fi
 
-        # Provide installed binary into our install dir if available
-        if [ -x "$HOME/.claude/claude" ]; then
-            ln -sf "$HOME/.claude/claude" "$INSTALL_DIR/claude-cli/claude"
-            export PATH="$INSTALL_DIR/claude-cli:$PATH"
-            log_success "Linked claude binary into $INSTALL_DIR/claude-cli and updated PATH."
+        # If claude was installed to ~/.local/bin, ensure current session can find it
+        if [ -x "$HOME/.local/bin/claude" ]; then
+            export PATH="$HOME/.local/bin:$PATH"
+            log_success "Detected claude in ~/.local/bin and added to PATH for this session."
         fi
     fi
-
     if ! check_command claude; then
         log_warning "Claude CLI not found in PATH; checking common install locations..."
         if [ -x "$HOME/.local/bin/claude" ]; then
-            ln -sf "$HOME/.local/bin/claude" "$INSTALL_DIR/claude-cli/claude"
-            export PATH="$INSTALL_DIR/claude-cli:$PATH"
-            log_success "Linked claude binary from ~/.local/bin into $INSTALL_DIR/claude-cli and updated PATH."
+            export PATH="$HOME/.local/bin:$PATH"
+            log_success "Added ~/.local/bin to PATH for this session. Add it to your shell rc to persist."
         elif [ -x "$HOME/.claude/claude" ]; then
-            ln -sf "$HOME/.claude/claude" "$INSTALL_DIR/claude-cli/claude"
-            export PATH="$INSTALL_DIR/claude-cli:$PATH"
-            log_success "Linked claude binary from ~/.claude into $INSTALL_DIR/claude-cli and updated PATH."
+            export PATH="$HOME/.claude:$PATH"
+            log_success "Added ~/.claude to PATH for this session. Add it to your shell rc to persist."
         else
             log_error "Claude installation did not produce a usable 'claude' binary."
             exit 1
+        fi
+    fi
+
+    # Ensure other shells can find 'claude' immediately: create /usr/local/bin/claude if missing
+    if [ -x "$HOME/.local/bin/claude" ] && [ ! -e /usr/local/bin/claude ]; then
+        log_step "Making 'claude' globally available by linking to /usr/local/bin/claude (may require sudo)..."
+        if sudo ln -sf "$HOME/.local/bin/claude" /usr/local/bin/claude 2>/dev/null; then
+            log_success "Created /usr/local/bin/claude -> $HOME/.local/bin/claude"
+        else
+            log_warning "Could not create /usr/local/bin/claude. To make 'claude' available run:\n  sudo ln -s $HOME/.local/bin/claude /usr/local/bin/claude\nor add ~/.local/bin to your PATH."
         fi
     fi
 
@@ -198,25 +279,13 @@ install_claude_cli() {
         log_warning "'claude install' doesn't accept --model; you may need to configure model manually."
     fi
 
-    log_success "Claude Code CLI installed successfully in $INSTALL_DIR/claude-cli."
+    log_success "Claude Code CLI installed successfully (native)."
 }
 
 # Main setup
 parse_arguments "$@"
 
-# Ensure installation directory exists and is writable (try sudo if necessary)
-if [ ! -d "$INSTALL_DIR" ]; then
-    if ! mkdir -p "$INSTALL_DIR" 2>/dev/null; then
-        log_warning "Cannot create $INSTALL_DIR as current user; attempting with sudo..."
-        sudo mkdir -p "$INSTALL_DIR"
-    fi
-fi
-
-# Recompute state dir in case --install-dir was provided
-STATE_DIR="$INSTALL_DIR/state"
-
-log_step "Starting installation for Claude Code Local."
-log_step "Using installation directory: $INSTALL_DIR"
+log_step "Starting installation for Claude Code Local (native installs)."
 
 # Install prerequisites
 log_step "Ensuring required dependencies (Docker, Node.js, Python)..."
@@ -240,8 +309,12 @@ log_success "All dependencies are installed."
 # Install components
 install_ollama
 configure_ollama
+ensure_ollama_running || log_warning "Ollama check/start failed — continuing but model pull may fail."
 install_gpt_oss_model
 install_claude_cli
+
+# Add PATH and ANTHROPIC environment exports to user's shell rc
+add_shell_exports
 
 log_step "Setup completed."
 echo -e "\n${GREEN}🎉 All tools installed successfully! 🎉${NC}"
@@ -251,13 +324,11 @@ echo -e "  - ${CYAN}Ollama${NC}"
 echo -e "      ↳ Includes GPT-OSS model for Claude Code CLI."
 echo -e "  - ${CYAN}Claude Code CLI${NC}"
 
-echo -e "\n${BOLD}Custom installation directory:${NC} $INSTALL_DIR"
-
 echo -e "\n${BOLD}Next steps:${NC}"
 echo -e "  1. Test Ollama:         ${CYAN}ollama chat gpt-oss${NC}"
 echo -e "  2. Test Claude CLI:     ${CYAN}claude --model=gpt-oss 'Write a Python loop that iterates over a list.'${NC}"
-echo -e "\n💡 If 'claude' is not found, add one of these to your shell rc (e.g. ~/.zshrc):"
-echo -e "  - ${CYAN}export PATH=\"$HOME/.local/bin:\$PATH\"${NC}  # if installed to ~/.local/bin"
-echo -e "  - ${CYAN}export PATH=\"$INSTALL_DIR/claude-cli:\$PATH\"${NC}  # if linked into install dir"
+echo -e "  3. Launch Claude via Ollama: ${CYAN}ollama launch claude${NC}"
+echo -e "\n💡 If 'claude' is not found, ensure ~/.local/bin is on your PATH (add to ~/.zshrc):"
+echo -e "  - ${CYAN}export PATH=\"$HOME/.local/bin:\$PATH\"${NC}"
 
 echo -e "\n${YELLOW}Happy coding! 🚀${NC}"
