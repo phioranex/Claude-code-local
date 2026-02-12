@@ -1,80 +1,97 @@
 # Claude Code Local
 
+[![YouTube](https://img.shields.io/badge/YouTube-@rvorine-red?style=for-the-badge&logo=youtube)](https://youtube.com/@rvorine)
+[![Instagram](https://img.shields.io/badge/Instagram-lacopydepastel-E4405F?style=for-the-badge&logo=instagram)](https://instagram.com/lacopydepastel)
+
 Easily set up local development tools for coding with an AI assistant. This script handles the installation of:
 
 - [Ollama](https://ollama.ai) (runtime + models)
 - GPT-OSS model (via Ollama)
 - Claude Code CLI
 
-## Install
+## Install (macOS / Linux)
 
-Run this one-liner to install everything (adjust `--install-dir` if needed):
+Run the installer (native installs):
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh)
 ```
+## Install (Windows)
 
-If you want to install on diffrent directory use following command:
+Use the PowerShell helper which downloads and runs the Ollama installer and attempts a WSL-based Claude install when possible:
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) --install-dir /path/to/external/drive
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\install-windows.ps1
 ```
 
-### Prerequisites
+Note: the official Claude bootstrap currently supports macOS/Linux; the Windows script will attempt a WSL install if WSL is present.
 
-Ensure the following are installed on your system:
+The script will:
+- install Ollama if missing
+- start or ensure Ollama is serving on `127.0.0.1:11434`
+- pull `gpt-oss` into Ollama (this is a large download and may take time)
+- install the `claude` CLI and add `~/.local/bin` to your shell rc (or create `/usr/local/bin/claude` via sudo)
 
-- **Docker:** Install from [Docker Docs](https://docs.docker.com/get-docker/)
-- **Node.js:** Install from [Node.js download](https://nodejs.org/)
-- **Python 3:** Install from [Python Downloads](https://www.python.org/downloads/)
 
-The installer will verify these dependencies before proceeding.
+## Prerequisites
 
-## Tools Setup
+- Node.js and Python 3 are recommended but not strictly required. The installer will warn if they're missing, but will continue.
+- No Docker dependency is required for Ollama to operate in this workflow.
 
-### Ollama
-- **What it does:** Enables local AI models runtime
-- **Installed by:** This script
-- **Model:** GPT-OSS (used by Claude Code CLI)
+## Quick verification & common commands
 
-Commands:
-- Test Ollama runtime:
-  ```bash
-  ollama chat gpt-oss
-  ```
-
-### Claude Code CLI
-- **What it does:** Provides a coding assistant interface
-- **Installed by:** pip
-
-Command:
-- Test CLI with GPT-OSS:
-  ```bash
-  claude-cli --model=gpt-oss 'Write a Python loop that iterates over a list.'
-  ```
-
-### Custom Directory
-
-If you wish to install GPT-OSS and Claude Code CLI to a custom location (e.g., external drive):
+- Verify Ollama is running and chat with the model:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/phioranex/Claude-code-local/main/install.sh) --install-dir /Volumes/SSD/LLM
+ollama chat gpt-oss
 ```
 
-This will configure both tools to use the specified directory.
+- Check installed models:
 
-## Troubleshooting
+```bash
+ollama list
+ollama show gpt-oss
+```
 
-1. **Dependencies not found:** Verify Docker, Node.js, and Python are installed.
-2. **Model pull fails:** Ensure system resources (disk, RAM) are sufficient.
-3. **Ollama error `unknown command "daemon"`:** Most likely a versioning issue. Run:
-   ```bash
-   ollama reset --storage /path/to/external/drive
-   ```
+- Verify `claude` CLI:
+
+```bash
+claude --help
+```
+
+- Launch Claude via Ollama (if the integration is available):
+
+```bash
+ollama launch claude
+```
+
+## Notes & Troubleshooting
+
+- Model download size: `gpt-oss` is large (~13 GB). If the pull is interrupted, rerun the installer or run `ollama pull gpt-oss` and wait — the script now waits for the model to finish installing.
+- If the installer reports the Ollama app started but `ollama` is not in your PATH, try opening a new shell or run:
+
+```bash
+# macOS: start the app bundle
+open -a Ollama --args hidden
+# or run the binary directly (if present)
+/Applications/Ollama.app/Contents/Resources/ollama --help
+```
+
+- If `~/.local` is owned by root the script will attempt to fix ownership with `sudo`; if that fails you can fix manually:
+
+```bash
+sudo chown -R $(id -u):$(id -g) $HOME/.local
+```
+
+- On macOS the script will try to create a global symlink `/usr/local/bin/claude` (requires sudo) so `claude` is available to new shells immediately. If that fails, add `~/.local/bin` to your shell rc (e.g. `~/.zshrc`).
+
+## Windows notes
+
+- Windows native Claude install is not available in the official bootstrap. For a full native experience install WSL and rerun the installer inside WSL, or use the provided `install-windows.ps1` which attempts a WSL-based installation.
 
 ## License
 
-This project is open-source under the [MIT License](./LICENSE).
+This project is open-source under the MIT License.
 
 ## Author
 [Phioranex](https://phioranex.com)
